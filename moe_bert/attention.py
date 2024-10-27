@@ -1,29 +1,29 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from constants import DEVICE
+
+from utils.config import AttentionConfig
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model: int = 512,
-                 num_heads: int = 8,
-                 pe: str = 'rotary') -> None:
+    def __init__(self, config: AttentionConfig) -> None:
         super(MultiHeadAttention, self).__init__()
-        assert pe in ['sinusoidal', 'rotary'], \
+        assert config.pe in ['sinusoidal', 'rotary'], \
             "Positional encoding must be either 'sinusoidal' or 'rotary'"
-        self.pe = pe
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.d_k = d_model // num_heads
-        self.W_q = nn.Linear(in_features=d_model, out_features=d_model)
-        self.W_k = nn.Linear(in_features=d_model, out_features=d_model)
-        self.W_v = nn.Linear(in_features=d_model, out_features=d_model)
-        self.W_o = nn.Linear(in_features=d_model, out_features=d_model)
+        self.pe = config.pe
+        self.d_model = config.d_model
+        self.num_heads = config.num_heads
+        self.d_k = config.d_model // config.num_heads
+        self.W_q = nn.Linear(in_features=config.d_model, out_features=config.d_model)
+        self.W_k = nn.Linear(in_features=config.d_model, out_features=config.d_model)
+        self.W_v = nn.Linear(in_features=config.d_model, out_features=config.d_model)
+        self.W_o = nn.Linear(in_features=config.d_model, out_features=config.d_model)
 
     def split_input_in_heads(self, x: torch.Tensor) -> torch.Tensor:
         """ Splits the last dimension of the input in self.num_heads pieces.
         Every piece (head) will operate on the on the entire sequence, but with a reduced dimension.
         The output will have the shape (batch_size, num_heads, seq_len, head_dimension)."""
+
         batch_size, seq_len, d_model = x.size()
         return x.view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
 
@@ -38,6 +38,7 @@ class MultiHeadAttention(nn.Module):
 
     def concat_heads(self, x: torch.Tensor) -> torch.Tensor:
         """Concatenates the last two dimensions of the input."""
+
         batch_size, num_heads, seq_len, head_dim = x.size()
         return x.transpose(1, 2).contiguous().view(batch_size, seq_len, self.d_model)
 
@@ -110,6 +111,7 @@ class MultiHeadAttention(nn.Module):
     def rotate_half(x):
         """Rotates half the hidden dims of the input."""
         # make -x2, x1, -x4, x3, -x6, x5, ... to multiple with sin matrix rotation for efficiency
+        # trick for efficient matrix multiplication
         x1 = x[..., : x.shape[-1] // 2]
         x2 = x[..., x.shape[-1] // 2:]
         return torch.cat((-x2, x1), dim=-1)
@@ -121,7 +123,6 @@ class MultiHeadAttention(nn.Module):
         x = (x * cos_values.repeat_interleave(2, dim=1) +
              self.rotate_half(x) * sin_values.repeat_interleave(2, dim=1))
         return x
-
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
         if self.pe == 'sinusoidal':
