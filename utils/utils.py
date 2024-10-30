@@ -4,6 +4,8 @@ import random
 import numpy as np
 import torch
 from datasets import load_dataset
+from pyngrok import ngrok
+from getpass import getpass
 
 from config import (MoEConfig,
                     ModelConfig,
@@ -25,7 +27,7 @@ def parse_args():
     parser.add_argument("--mlm_probability", type=float, default=0.15)
     parser.add_argument("--label_smoothing", type=float, default=0.1)
     parser.add_argument("--lr_scheduler", type=str, default="cosine")
-    parser.add_argument("--num_warmup_steps", type=int, default=0.1)
+    parser.add_argument("--num_warmup_steps", type=int, default=0.03)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--balance_loss", type=bool, default=True)
     parser.add_argument("--alpha", type=float, default=1e-2)
@@ -46,6 +48,23 @@ def parse_args():
     parser.add_argument("--norm_type", type=float, default=2.0)
 
     return parser.parse_args()
+
+
+def setup_tunneling(args):
+    # IMP: please create a auth token from https://dashboard.ngrok.com/auth by creating an account.
+    # the below auth ticket will not work for anyone re-running the notebook.
+
+    # Terminate open tunnels if exist
+    ngrok.kill()
+
+    # Setting the authtoken (optional)
+    # Get your authtoken from https://dashboard.ngrok.com/auth
+    NGROK_AUTH_TOKEN = args.auth_token
+    ngrok.set_auth_token(NGROK_AUTH_TOKEN)
+
+    # Open an HTTPs tunnel on port 5000 for http://localhost:5000
+    ngrok_tunnel = ngrok.connect(addr="5000", proto="http", bind_tls=True)
+    print("MLflow Tracking UI:", ngrok_tunnel.public_url)
 
 
 def get_model_config(args):
@@ -133,3 +152,17 @@ def prepare_dataloaders(dataset, mlm_collator, args):
                                                   collate_fn=mlm_collator,
                                                   pin_memory=True)
     return train_dataloader, eval_dataloader
+
+
+def get_chosen_experts(routing_weights_list, k=2):
+    num_layers = len(routing_weights_list)
+    num_tokens, num_experts = routing_weights_list[0].size()
+    tokens_dispatch = torch.zeros(num_experts, device=routing_weights_list[0].device)
+    for routing_weights in routing_weights_list:
+        _, selected_experts = torch.topk(routing_weights, k, dim=-1)
+        # fi
+        for i in range(num_experts):
+            tokens_dispatch[i] += torch.sum(selected_experts == i)
+
+    tokens_dispatch /= (num_tokens * num_layers * 2)
+    return tokens_dispatch.cpu().numpy()

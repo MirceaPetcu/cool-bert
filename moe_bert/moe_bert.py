@@ -24,6 +24,12 @@ class MoeBert(nn.Module):
             self.lm_head = nn.Linear(config.d_model, 2)
         elif config.task == 'custom':
             self.lm_head = nn.Linear(config.d_model, config.num_classes)
+        self._init_params()
+
+    def _init_params(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_normal_(p)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
         x = self.embeddings(x)
